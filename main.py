@@ -233,7 +233,7 @@ class MyApp(ShowBase):
 
         # Generate slope map and apply shader
         slope_image = terrain.make_slope_image()
-        slope_image.save("slope.png")
+        slope_image.write("slope.png")
         slope_tex = self.loader.load_texture("slope.png")
         self.terrain_root.set_texture(slope_tex)
 
