@@ -1,5 +1,4 @@
 //GLSL
-#version 130
 
 // Input from vertex shader
 in vec2 texcoord;

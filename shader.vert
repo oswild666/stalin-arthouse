@@ -1,5 +1,4 @@
 //GLSL
-#version 130
 
 // Input vertex data
 in vec4 p3d_Vertex;
