@@ -1,0 +1,4 @@
+Known pipe types:
+  glxGraphicsPipe
+(1 aux display modules not yet loaded.)
+:display:x11display(error): Could not open display ":0.0".

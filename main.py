@@ -13,7 +13,53 @@ from panda3d.bullet import (
     BulletBoxShape, BulletGhostNode, BulletSphereShape
 )
 from perlin_noise import PerlinNoise
+import math
 from PIL import Image
+
+class CatController:
+    def __init__(self, physics_np):
+        self.physics_np = physics_np
+        self.physics_node = physics_np.node()
+
+        self.state_timer = 0
+        self.state = "IDLE"
+        self.speed = 2.0
+        self.task = base.task_mgr.add(self.update, f"cat_update_{id(self)}")
+
+    def update(self, task):
+        dt = globalClock.get_dt()
+        self.state_timer -= dt
+
+        if self.state_timer <= 0:
+            self.change_state()
+
+        if self.state == "WALKING":
+            forward_vec = self.physics_np.get_quat().get_forward()
+            forward_vec.z = 0
+            forward_vec.normalize()
+
+            current_vel = self.physics_node.get_linear_velocity()
+            new_vel = forward_vec * self.speed
+            new_vel.z = current_vel.z
+            self.physics_node.set_linear_velocity(new_vel)
+            self.physics_node.set_active(True)
+
+        return task.cont
+
+    def change_state(self):
+        if self.state == "IDLE":
+            self.state = "WALKING"
+            self.state_timer = random.uniform(3.0, 7.0)
+            angle = random.uniform(0, 360)
+            self.physics_np.set_h(angle)
+        else: # Walking
+            self.state = "IDLE"
+            self.state_timer = random.uniform(2.0, 5.0)
+            self.physics_node.set_linear_velocity(Vec3(0))
+
+    def destroy(self):
+        base.task_mgr.remove(self.task)
+
 
 class PlayerController:
     def __init__(self, camera, win, physics_world):
@@ -93,9 +139,11 @@ class MyApp(ShowBase):
         ShowBase.__init__(self)
         self.disable_mouse()
         self.terrain_size = 513
+        self.total_entities = 100
         self.terrain_root = None
         self.artifacts = []
-        self.trees = []
+        self.cats = []
+        self.cat_controllers = []
         self.terrain_phys_node = None
 
         self.setup_physics()
@@ -128,11 +176,16 @@ class MyApp(ShowBase):
         for np in self.render.find_all_matches("**/artifact_visual"):
             np.remove_node()
 
-        # Clear trees
-        for tree_phys_node, tree_visual_np in self.trees:
-            self.physics_world.remove_rigid_body(tree_phys_node)
-            tree_visual_np.remove_node()
-        self.trees.clear()
+        # Clear cat controllers
+        for controller in self.cat_controllers:
+            controller.destroy()
+        self.cat_controllers.clear()
+
+        # Clear cats
+        for cat_phys_node, cat_phys_np in self.cats:
+            self.physics_world.remove_rigid_body(cat_phys_node)
+            cat_phys_np.remove_node()
+        self.cats.clear()
 
         # Clear terrain
         if self.terrain_phys_node:
@@ -146,7 +199,11 @@ class MyApp(ShowBase):
         print("Generating new world...")
         self.clear_world()
         self.create_terrain()
-        self.place_objects(num_trees=50, num_artifacts=5)
+
+        num_artifacts = max(1, int(self.total_entities * 0.1))
+        num_cats = self.total_entities - num_artifacts
+        self.place_entities(num_cats=num_cats, num_artifacts=num_artifacts)
+
         if not is_initial:
             spawn_pos = self.find_valid_spawn_point() or Point3(0, 0, 50)
             self.player_controller.set_pos(spawn_pos)
@@ -174,6 +231,16 @@ class MyApp(ShowBase):
         self.terrain_root.set_pos(-center_offset, -center_offset, 0)
         terrain.generate()
 
+        # Generate slope map and apply shader
+        slope_image = terrain.make_slope_image()
+        slope_image.save("slope.png")
+        slope_tex = self.loader.load_texture("slope.png")
+        self.terrain_root.set_texture(slope_tex)
+
+        my_shader = self.loader.load_shader("shader.vert", "shader.frag")
+        self.terrain_root.set_shader(my_shader)
+        self.terrain_root.set_shader_input("p3d_Texture0", slope_tex)
+
         mesh = BulletTriangleMesh()
         for geom_node in self.terrain_root.find_all_matches('**/+GeomNode'):
             for geom in geom_node.node().get_geoms():
@@ -185,48 +252,72 @@ class MyApp(ShowBase):
         self.render.attach_new_node(self.terrain_phys_node)
         self.physics_world.attach_rigid_body(self.terrain_phys_node)
 
-    def place_objects(self, num_trees, num_artifacts):
-        cm = CardMaker('card')
-        cm.set_frame(-0.5, 0.5, -0.5, 0.5)
-        box_model = NodePath('box')
-        for i in range(6):
-            face = box_model.attach_new_node(cm.generate())
-            if i == 0: face.set_pos(0, -0.5, 0)
-            elif i == 1: face.set_hpr(180, 0, 0); face.set_pos(0, 0.5, 0)
-            elif i == 2: face.set_hpr(0, -90, 0); face.set_pos(0, 0, 0.5)
-            elif i == 3: face.set_hpr(0, 90, 0); face.set_pos(0, 0, -0.5)
-            elif i == 4: face.set_hpr(-90, 0, 0); face.set_pos(0.5, 0, 0)
-            elif i == 5: face.set_hpr(90, 0, 0); face.set_pos(-0.5, 0, 0)
-        box_model.flatten_strong()
+    def place_entities(self, num_cats, num_artifacts):
+        # Load models or create placeholders
+        try:
+            crystal_model = self.loader.load_model("models/crystal.glb")
+        except Exception:
+            print("Warning: Could not load 'models/crystal.glb'. Using a placeholder.")
+            cm = CardMaker('crystal_placeholder')
+            cm.set_frame(-0.4, 0.4, -0.4, 0.4)
+            crystal_model = NodePath(cm.generate())
+            crystal_model.set_color(1, 0, 1, 1) # Magenta
 
-        for _ in range(num_trees):
+        cat_models = []
+        for i in range(1, 4):
+            try:
+                model = self.loader.load_model(f"models/cat{i}.glb")
+                cat_models.append(model)
+            except Exception:
+                print(f"Warning: Could not load 'models/cat{i}.glb'. Using a placeholder.")
+                # Using a simple card as a placeholder
+                cm = CardMaker(f'cat_placeholder_{i}')
+                cm.set_frame(-0.5, 0.5, 0, 1.8) # Approx cat height
+                cat_model = NodePath(cm.generate())
+                cat_model.set_color(random.random(), random.random(), random.random(), 1)
+                cat_models.append(cat_model)
+
+        if not cat_models: # Ensure we have at least one model
+            print("Error: No cat models or placeholders could be created.")
+            return
+
+        # Place Cats
+        for _ in range(num_cats):
             pos = self.find_valid_spawn_point()
             if pos:
-                z_scale = random.uniform(3.0, 6.0)
-
-                # Position visual model
-                tree_np = self.render.attach_new_node("tree_visual")
-                box_model.instance_to(tree_np)
-                tree_np.set_scale(1, 1, z_scale)
-                # Place the model so its bottom is at `pos`
-                tree_np.set_pos(pos + Vec3(0, 0, z_scale / 2))
-
-                # Create and position physics shape
-                shape = BulletBoxShape(Vec3(0.5, 0.5, z_scale / 2))
-                node = BulletRigidBodyNode('Tree')
+                # Create physics node
+                shape = BulletBoxShape(Vec3(0.3, 0.5, 0.5))
+                node = BulletRigidBodyNode('Cat')
+                node.set_mass(5.0)
                 node.add_shape(shape)
-                np = self.render.attach_new_node(node)
-                np.set_pos(pos + Vec3(0, 0, z_scale / 2))
-                self.physics_world.attach_rigid_body(node)
-                self.trees.append((node, tree_np))
+                node.set_angular_factor(Vec3(0, 0, 1)) # Allow rotation only on Z axis
+                node.set_friction(0.8)
 
+                cat_phys_np = self.render.attach_new_node(node)
+                cat_phys_np.set_pos(pos + Vec3(0, 0, 0.5))
+                self.physics_world.attach_rigid_body(node)
+
+                # Create visual node and parent it to the physics node
+                cat_visual_np = NodePath("cat_visual")
+                model = random.choice(cat_models)
+                model.instance_to(cat_visual_np)
+                cat_visual_np.reparent_to(cat_phys_np)
+                cat_visual_np.set_pos(0, 0, -0.5) # Center the visual model
+
+                # Create controller
+                controller = CatController(cat_phys_np)
+                self.cat_controllers.append(controller)
+
+                self.cats.append((node, cat_phys_np))
+
+        # Place Artifacts
         for _ in range(num_artifacts):
             pos = self.find_valid_spawn_point()
             if pos:
                 artifact_np = self.render.attach_new_node("artifact_visual")
-                box_model.instance_to(artifact_np)
+                crystal_model.instance_to(artifact_np)
                 artifact_np.set_pos(pos + Vec3(0,0,1))
-                artifact_np.set_color(1, 0, 0, 1)
+
                 shape = BulletSphereShape(radius=1.5)
                 ghost_node = BulletGhostNode('Artifact')
                 ghost_node.add_shape(shape)
