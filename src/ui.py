@@ -4,6 +4,7 @@ from rich.console import Console
 from rich.text import Text
 from rich.align import Align
 from rich.table import Table
+from rich.box import DASHED
 
 # Import data models
 from src.data_models import Project, Channel, Step, Note, NoteName, LoopMode
@@ -87,7 +88,8 @@ def update_layout(layout: Layout, project: Project, active_channel_idx: int):
 
     add_channel_panel = Panel(
         Align.center(add_channel_text),
-        border_style="dashed green"
+        border_style="green",
+        box=DASHED
     )
 
     # Create a new layout for the channels area and split it correctly
