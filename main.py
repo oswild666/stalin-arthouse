@@ -202,15 +202,21 @@ class MyApp(ShowBase):
         for _ in range(num_trees):
             pos = self.find_valid_spawn_point()
             if pos:
+                z_scale = random.uniform(3.0, 6.0)
+
+                # Position visual model
                 tree_np = self.render.attach_new_node("tree_visual")
                 box_model.instance_to(tree_np)
-                tree_np.set_pos(pos)
-                tree_np.set_scale(1, 1, random.uniform(3.0, 6.0))
-                shape = BulletBoxShape(Vec3(0.5, 0.5, tree_np.get_sz().z / 2))
+                tree_np.set_scale(1, 1, z_scale)
+                # Place the model so its bottom is at `pos`
+                tree_np.set_pos(pos + Vec3(0, 0, z_scale / 2))
+
+                # Create and position physics shape
+                shape = BulletBoxShape(Vec3(0.5, 0.5, z_scale / 2))
                 node = BulletRigidBodyNode('Tree')
                 node.add_shape(shape)
                 np = self.render.attach_new_node(node)
-                np.set_pos(pos + Vec3(0, 0, tree_np.get_sz().z / 2))
+                np.set_pos(pos + Vec3(0, 0, z_scale / 2))
                 self.physics_world.attach_rigid_body(node)
                 self.trees.append((node, tree_np))
 
