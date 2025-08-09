@@ -1,0 +1,4 @@
+rich
+prompt_toolkit
+mido
+python-rtmidi
