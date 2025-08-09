@@ -90,7 +90,13 @@ def update_layout(layout: Layout, project: Project, active_channel_idx: int):
         border_style="dashed green"
     )
 
-    layout["channels_area"].update(Layout([channels_layout, add_channel_panel]))
+    # Create a new layout for the channels area and split it correctly
+    channels_area_layout = Layout()
+    channels_area_layout.split_column(
+        channels_layout,
+        Layout(add_channel_panel, size=3) # Give the button a fixed size of 3 lines
+    )
+    layout["channels_area"].update(channels_area_layout)
 
     # Inspector Placeholder
     inspector_placeholder = "[italic gray50]Детали выбранного шага..."
